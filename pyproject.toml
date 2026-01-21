@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "finmarket"
-version = "1.0.0"
+version = "1.1.0"
 description = "Librería para obtener datos financieros de Finmarket Live"
 readme = "README.md"
 license = {text = "MIT"}
