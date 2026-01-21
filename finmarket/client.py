@@ -4,7 +4,7 @@ Cliente principal para la API de Finmarket
 
 import re
 import requests
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Optional, Literal
 
 from .models import SearchResult, ChartData, ChartPoint
@@ -125,10 +125,16 @@ class FinmarketClient:
         url = f"{self.BASE_URL}/chart/datachart.html"
         params = {
             "ID_NOTATION": id_notation,
-            "TIME_SPAN": time_span,
             "QUALITY": quality,
             "VOLUME": str(volume).lower()
         }
+
+        # Si es MAX, usar parámetros de fecha en lugar de TIME_SPAN
+        if time_span == "MAX":
+            params["DATEINI"] = "1900-01-01"
+            params["DATEFIN"] = date.today().strftime("%Y-%m-%d")
+        else:
+            params["TIME_SPAN"] = time_span
 
         response = self.session.get(url, params=params, timeout=self.timeout)
         response.raise_for_status()
@@ -149,25 +155,30 @@ class FinmarketClient:
         """
         points = []
 
-        # Patrón para extraer cada objeto del array
-        object_pattern = r'\{([^}]+)\}'
+        # Patrón mejorado para extraer cada objeto del array JavaScript
+        # Busca desde { hasta el siguiente }, considerando que puede haber new Date(...) dentro
+        object_pattern = r'\{date:new Date\(([^)]+)\)([^}]*)\}'
         objects = re.findall(object_pattern, text)
 
-        for obj_str in objects:
+        for date_part, rest_part in objects:
             point_data = {}
 
-            # Extraer fecha: new Date(year, month, day, hour, minute, second)
-            date_match = re.search(r'date:\s*new Date\((\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+),\s*(\d+)\)', obj_str)
-            if date_match:
-                year, month, day, hour, minute, second = map(int, date_match.groups())
+            # Parsear la fecha: year, month, day, hour, minute, second
+            date_values = [int(x.strip()) for x in date_part.split(',')]
+            if len(date_values) >= 3:
+                year, month, day = date_values[0], date_values[1], date_values[2]
+                hour = date_values[3] if len(date_values) > 3 else 0
+                minute = date_values[4] if len(date_values) > 4 else 0
+                second = date_values[5] if len(date_values) > 5 else 0
                 # JavaScript los meses son 0-indexed, Python no
                 point_data['date'] = datetime(year, month + 1, day, hour, minute, second)
             else:
                 continue
 
-            # Extraer valores numéricos
+            # Extraer valores numéricos del resto del objeto
+            full_obj = f"{{date:new Date({date_part}){rest_part}}}"
             for field in ['close', 'high', 'low', 'open', 'volume', 'pctrel', 'decimals']:
-                match = re.search(rf'{field}:([-\d.]+)', obj_str)
+                match = re.search(rf'{field}:([-\d.]+)', full_obj)
                 if match:
                     value = match.group(1)
                     if field in ['volume', 'decimals']:
